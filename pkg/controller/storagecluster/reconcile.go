@@ -32,6 +32,11 @@ type ReconcileStrategy string
 // StorageClassProvisionerType is a string representing StorageClass Provisioner. E.g: aws-ebs
 type StorageClassProvisionerType string
 
+type resourceManager interface {
+	ensureCreated(*ReconcileStorageCluster, *ocsv1.StorageCluster) error
+	ensureDeleted(*ReconcileStorageCluster, *ocsv1.StorageCluster) error
+}
+
 // ensureFunc which encapsulate all the 'ensure*' type functions
 type ensureFunc func(*ocsv1.StorageCluster, logr.Logger) error
 

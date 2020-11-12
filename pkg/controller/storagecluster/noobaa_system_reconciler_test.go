@@ -103,8 +103,11 @@ func TestEnsureNooBaaSystem(t *testing.T) {
 		},
 	}
 
+	var obj ocsNoobaaSystem
+
 	for _, c := range cases {
 		reconciler := getReconciler(t, &v1alpha1.NooBaa{})
+		reconciler.reqLogger = noobaaReconcileTestLogger
 		reconciler.client.Create(context.TODO(), &cephCluster) //nolint //ignoring err check as causes failure
 
 		if c.isCreate {
@@ -114,7 +117,7 @@ func TestEnsureNooBaaSystem(t *testing.T) {
 			err := reconciler.client.Create(context.TODO(), &c.noobaa)
 			assert.NoError(t, err)
 		}
-		err := reconciler.ensureNoobaaSystem(&sc, noobaaReconcileTestLogger)
+		err := obj.ensureCreated(&reconciler, &sc)
 		assert.NoError(t, err)
 
 		_ = reconciler.client.Get(context.TODO(), namespacedName, &noobaa)
@@ -196,11 +199,14 @@ func TestNooBaaReconcileStrategy(t *testing.T) {
 		},
 	}
 
+	var obj ocsNoobaaSystem
+
 	for _, c := range cases {
 		c.sc.Status.Images.NooBaaCore = &v1.ComponentImageStatus{}
 		c.sc.Status.Images.NooBaaDB = &v1.ComponentImageStatus{}
 
 		reconciler := getReconciler(t, &v1alpha1.NooBaa{})
+		reconciler.reqLogger = noobaaReconcileTestLogger
 
 		cephCluster := cephv1.CephCluster{}
 		cephCluster.Name = generateNameForCephClusterFromString(namespacedName.Name)
@@ -209,10 +215,10 @@ func TestNooBaaReconcileStrategy(t *testing.T) {
 		err := reconciler.client.Create(context.TODO(), &cephCluster)
 		assert.NoError(t, err)
 
-		err = reconciler.ensureNoobaaSystem(&c.sc, noobaaReconcileTestLogger)
+		err = obj.ensureCreated(&reconciler, &c.sc)
 		assert.NoError(t, err)
 
-		err = reconciler.ensureNoobaaSystem(&c.sc, noobaaReconcileTestLogger)
+		err = obj.ensureCreated(&reconciler, &c.sc)
 		assert.NoError(t, err)
 
 		noobaa := v1alpha1.NooBaa{}
@@ -333,6 +339,8 @@ func assertNoobaaResource(t *testing.T, reconciler ReconcileStorageCluster) {
 		},
 	}
 
+	var obj ocsNoobaaSystem
+
 	cr := &v1.StorageCluster{}
 	err := reconciler.client.Get(context.TODO(), request.NamespacedName, cr)
 	assert.NoError(t, err)
@@ -348,7 +356,7 @@ func assertNoobaaResource(t *testing.T, reconciler ReconcileStorageCluster) {
 	err = reconciler.client.Update(context.TODO(), foundCeph)
 	assert.NoError(t, err)
 	// calling 'ensureNoobaaSystem()' function and the expectation is that 'Noobaa' system is not be created
-	err = reconciler.ensureNoobaaSystem(cr, reconciler.reqLogger)
+	err = obj.ensureCreated(&reconciler, cr)
 	assert.NoError(t, err)
 	fNoobaa := &v1alpha1.NooBaa{}
 	request.Name = "noobaa"
@@ -362,7 +370,7 @@ func assertNoobaaResource(t *testing.T, reconciler ReconcileStorageCluster) {
 	assert.NoError(t, err)
 	// call 'ensureNoobaaSystem()' to make sure it takes appropriate action
 	// when ceph cluster is connected to an external cluster
-	err = reconciler.ensureNoobaaSystem(cr, reconciler.reqLogger)
+	err = obj.ensureCreated(&reconciler, cr)
 	assert.NoError(t, err)
 	fNoobaa = &v1alpha1.NooBaa{}
 	request.Name = "noobaa"
@@ -437,7 +445,10 @@ func assertNoobaaKMSConfiguration(t *testing.T, kmsArgs struct {
 	if !kmsArgs.failureExpected {
 		startServerAt(kmsArgs.kmsAddress)
 	}
-	err := reconciler.ensureCephCluster(cr, reconciler.reqLogger)
+
+	var obj ocsCephCluster
+
+	err := obj.ensureCreated(&reconciler, cr)
 	if kmsArgs.failureExpected && err == nil {
 		// case 1: if we are expecting a failure and returned error is 'nil'
 		t.Errorf("Expecting the cephcluster creation to fail")
@@ -462,7 +473,10 @@ func assertNoobaaKMSConfiguration(t *testing.T, kmsArgs struct {
 		t.Errorf("CephCluster error: %v, %v", err, kmsArgs.testLabel)
 		t.FailNow()
 	}
-	err = reconciler.ensureNoobaaSystem(cr, noobaaReconcileTestLogger)
+
+	var objNoobaa ocsNoobaaSystem
+
+	err = objNoobaa.ensureCreated(&reconciler, cr)
 	assert.NoError(t, err, fmt.Sprintf("Failed to ensure Noobaa system: %v, %v", err, kmsArgs.testLabel))
 	nb := &v1alpha1.NooBaa{}
 	err = reconciler.client.Get(ctxTodo, types.NamespacedName{Name: "noobaa"}, nb)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	ocsv1 "github.com/openshift/ocs-operator/pkg/apis/ocs/v1"
 	"github.com/openshift/ocs-operator/pkg/controller/defaults"
 	cephv1 "github.com/rook/rook/pkg/apis/ceph.rook.io/v1"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+type ocsCephFilesystems struct{}
 
 // newCephFilesystemInstances returns the cephFilesystem instances that should be created
 // on first run.
@@ -57,9 +58,9 @@ func (r *ReconcileStorageCluster) newCephFilesystemInstances(initData *ocsv1.Sto
 	return ret, nil
 }
 
-// ensureCephFilesystems ensures that cephFilesystem resources exist in the desired
+// ensureCreated ensures that cephFilesystem resources exist in the desired
 // state.
-func (r *ReconcileStorageCluster) ensureCephFilesystems(instance *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+func (obj *ocsCephFilesystems) ensureCreated(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
 	reconcileStrategy := ReconcileStrategy(instance.Spec.ManagedResources.CephFilesystems.ReconcileStrategy)
 	if reconcileStrategy == ReconcileStrategyIgnore {
 		return nil
@@ -78,11 +79,11 @@ func (r *ReconcileStorageCluster) ensureCephFilesystems(instance *ocsv1.StorageC
 				return nil
 			}
 			if existing.DeletionTimestamp != nil {
-				reqLogger.Info(fmt.Sprintf("Unable to restore init object because %s is marked for deletion", existing.Name))
+				r.reqLogger.Info(fmt.Sprintf("Unable to restore init object because %s is marked for deletion", existing.Name))
 				return fmt.Errorf("failed to restore initialization object %s because it is marked for deletion", existing.Name)
 			}
 
-			reqLogger.Info(fmt.Sprintf("Restoring original cephFilesystem %s", cephFilesystem.Name))
+			r.reqLogger.Info(fmt.Sprintf("Restoring original cephFilesystem %s", cephFilesystem.Name))
 			existing.ObjectMeta.OwnerReferences = cephFilesystem.ObjectMeta.OwnerReferences
 			cephFilesystem.ObjectMeta = existing.ObjectMeta
 			err = r.client.Update(context.TODO(), cephFilesystem)
@@ -90,7 +91,7 @@ func (r *ReconcileStorageCluster) ensureCephFilesystems(instance *ocsv1.StorageC
 				return err
 			}
 		case errors.IsNotFound(err):
-			reqLogger.Info(fmt.Sprintf("Creating cephFilesystem %s", cephFilesystem.Name))
+			r.reqLogger.Info(fmt.Sprintf("Creating cephFilesystem %s", cephFilesystem.Name))
 			err = r.client.Create(context.TODO(), cephFilesystem)
 			if err != nil {
 				return err
@@ -98,5 +99,44 @@ func (r *ReconcileStorageCluster) ensureCephFilesystems(instance *ocsv1.StorageC
 		}
 	}
 
+	return nil
+}
+
+// ensureDeleted deletes the CephFilesystems owned by the StorageCluster
+func (obj *ocsCephFilesystems) ensureDeleted(r *ReconcileStorageCluster, sc *ocsv1.StorageCluster) error {
+	foundCephFilesystem := &cephv1.CephFilesystem{}
+	cephFilesystems, err := r.newCephFilesystemInstances(sc)
+	if err != nil {
+		return err
+	}
+
+	for _, cephFilesystem := range cephFilesystems {
+		err := r.client.Get(context.TODO(), types.NamespacedName{Name: cephFilesystem.Name, Namespace: sc.Namespace}, foundCephFilesystem)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				r.reqLogger.Info("Uninstall: CephFilesystem not found", "CephFilesystem Name", cephFilesystem.Name)
+				continue
+			}
+			return fmt.Errorf("Uninstall: Unable to retrieve cephFilesystem %v: %v", cephFilesystem.Name, err)
+		}
+
+		if cephFilesystem.GetDeletionTimestamp().IsZero() {
+			r.reqLogger.Info("Uninstall: Deleting cephFilesystem", "CephFilesystem Name", cephFilesystem.Name)
+			err = r.client.Delete(context.TODO(), foundCephFilesystem)
+			if err != nil {
+				return fmt.Errorf("Uninstall: Failed to delete cephFilesystem %v: %v", foundCephFilesystem.Name, err)
+			}
+		}
+
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: cephFilesystem.Name, Namespace: sc.Namespace}, foundCephFilesystem)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				r.reqLogger.Info("Uninstall: CephFilesystem is deleted", "CephFilesystem Name", cephFilesystem.Name)
+				continue
+			}
+		}
+		return fmt.Errorf("Uninstall: Waiting for cephFilesystem %v to be deleted", cephFilesystem.Name)
+
+	}
 	return nil
 }

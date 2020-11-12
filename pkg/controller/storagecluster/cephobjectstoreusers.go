@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+type ocsCephObjectStoreUsers struct{}
+
 // newCephObjectStoreUserInstances returns the cephObjectStoreUser instances that should be created
 // on first run.
 func (r *ReconcileStorageCluster) newCephObjectStoreUserInstances(initData *ocsv1.StorageCluster) ([]*cephv1.CephObjectStoreUser, error) {
@@ -37,9 +39,9 @@ func (r *ReconcileStorageCluster) newCephObjectStoreUserInstances(initData *ocsv
 	return ret, nil
 }
 
-// ensureCephObjectStoreUsers ensures that cephObjectStoreUser resources exist in the desired
+// ensureCreated ensures that cephObjectStoreUser resources exist in the desired
 // state.
-func (r *ReconcileStorageCluster) ensureCephObjectStoreUsers(instance *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+func (obj *ocsCephObjectStoreUsers) ensureCreated(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
 	reconcileStrategy := ReconcileStrategy(instance.Spec.ManagedResources.CephObjectStoreUsers.ReconcileStrategy)
 	if reconcileStrategy == ReconcileStrategyIgnore {
 		return nil
@@ -56,13 +58,52 @@ func (r *ReconcileStorageCluster) ensureCephObjectStoreUsers(instance *ocsv1.Sto
 	if err != nil {
 		return err
 	}
-	err = r.createCephObjectStoreUsers(cephObjectStoreUsers, instance, reqLogger)
+	err = r.createCephObjectStoreUsers(cephObjectStoreUsers, instance, r.reqLogger)
 	if err != nil {
-		reqLogger.Error(err, "could not create CephObjectStoresUsers")
+		r.reqLogger.Error(err, "could not create CephObjectStoresUsers")
 		return err
 	}
 
 	return err
+}
+
+// ensureDeleted deletes the CephObjectStoreUsers owned by the StorageCluster
+func (obj *ocsCephObjectStoreUsers) ensureDeleted(r *ReconcileStorageCluster, sc *ocsv1.StorageCluster) error {
+	foundCephObjectStoreUser := &cephv1.CephObjectStoreUser{}
+	cephObjectStoreUsers, err := r.newCephObjectStoreUserInstances(sc)
+	if err != nil {
+		return err
+	}
+
+	for _, cephObjectStoreUser := range cephObjectStoreUsers {
+		err := r.client.Get(context.TODO(), types.NamespacedName{Name: cephObjectStoreUser.Name, Namespace: sc.Namespace}, foundCephObjectStoreUser)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				r.reqLogger.Info("Uninstall: CephObjectStoreUser not found", "CephObjectStoreUser Name", cephObjectStoreUser.Name)
+				continue
+			}
+			return fmt.Errorf("Uninstall: Unable to retrieve cephObjectStoreUser %v: %v", cephObjectStoreUser.Name, err)
+		}
+
+		if cephObjectStoreUser.GetDeletionTimestamp().IsZero() {
+			r.reqLogger.Info("Uninstall: Deleting cephObjectStoreUser", "CephObjectStoreUser Name", cephObjectStoreUser.Name)
+			err = r.client.Delete(context.TODO(), foundCephObjectStoreUser)
+			if err != nil {
+				return fmt.Errorf("Uninstall: Failed to delete cephObjectStoreUser %v: %v", foundCephObjectStoreUser.Name, err)
+			}
+		}
+
+		err = r.client.Get(context.TODO(), types.NamespacedName{Name: cephObjectStoreUser.Name, Namespace: sc.Namespace}, foundCephObjectStoreUser)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				r.reqLogger.Info("Uninstall: CephObjectStoreUser is deleted", "CephObjectStoreUser Name", cephObjectStoreUser.Name)
+				continue
+			}
+		}
+		return fmt.Errorf("Uninstall: Waiting for cephObjectStoreUser %v to be deleted", cephObjectStoreUser.Name)
+
+	}
+	return nil
 }
 
 // createCephObjectStoreUsers creates CephObjectStoreUsers in the desired state

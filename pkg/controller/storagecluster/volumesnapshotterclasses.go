@@ -17,6 +17,8 @@ import (
 // SnapshotterType represents a snapshotter type
 type SnapshotterType string
 
+type ocsSnapshotClass struct{}
+
 const (
 	rbdSnapshotter    SnapshotterType = "rbd"
 	cephfsSnapshotter SnapshotterType = "cephfs"
@@ -125,14 +127,47 @@ func (r *ReconcileStorageCluster) createSnapshotClasses(vsccs []SnapshotClassCon
 	return nil
 }
 
-// ensureSnapshotClasses functions ensures that snpashotter classes are created
-func (r *ReconcileStorageCluster) ensureSnapshotClasses(instance *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+// ensureCreated functions ensures that snpashotter classes are created
+func (obj *ocsSnapshotClass) ensureCreated(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
 	vsccs := newSnapshotClassConfigurations(instance)
 
-	err := r.createSnapshotClasses(vsccs, reqLogger)
+	err := r.createSnapshotClasses(vsccs, r.reqLogger)
 	if err != nil {
 		return nil
 	}
 
+	return nil
+}
+
+// ensureDeleted deletes the SnapshotClasses that the ocs-operator created
+func (obj *ocsSnapshotClass) ensureDeleted(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
+
+	vsccs := newSnapshotClassConfigurations(instance)
+	for _, vscc := range vsccs {
+		sc := vscc.snapshotClass
+		existing := snapapi.VolumeSnapshotClass{}
+		err := r.client.Get(context.TODO(), types.NamespacedName{Name: sc.Name, Namespace: sc.Namespace}, &existing)
+
+		switch {
+		case err == nil:
+			if existing.DeletionTimestamp != nil {
+				r.reqLogger.Info(fmt.Sprintf("Uninstall: SnapshotClass %s is already marked for deletion", existing.Name))
+				break
+			}
+
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: Deleting SnapshotClass %s", sc.Name))
+			existing.ObjectMeta.OwnerReferences = sc.ObjectMeta.OwnerReferences
+			sc.ObjectMeta = existing.ObjectMeta
+
+			err = r.client.Delete(context.TODO(), sc)
+			if err != nil {
+				r.reqLogger.Error(err, fmt.Sprintf("Uninstall: Ignoring error deleting the SnapshotClass %s", existing.Name))
+			}
+		case errors.IsNotFound(err):
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: SnapshotClass %s not found, nothing to do", sc.Name))
+		default:
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: Error while getting SnapshotClass %s: %v", sc.Name, err))
+		}
+	}
 	return nil
 }

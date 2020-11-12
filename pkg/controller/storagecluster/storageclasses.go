@@ -21,19 +21,58 @@ type StorageClassConfiguration struct {
 	disable           bool
 }
 
-// ensureStorageClasses ensures that StorageClass resources exist in the desired
+type ocsStorageClass struct{}
+
+// ensureCreated ensures that StorageClass resources exist in the desired
 // state.
-func (r *ReconcileStorageCluster) ensureStorageClasses(instance *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+func (obj *ocsStorageClass) ensureCreated(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
 	scs, err := r.newStorageClassConfigurations(instance)
 	if err != nil {
 		return err
 	}
 
-	err = r.createStorageClasses(scs, reqLogger)
+	err = r.createStorageClasses(scs, r.reqLogger)
 	if err != nil {
 		return err
 	}
 
+	return nil
+}
+
+// ensureDeleted deletes the storageClasses that the ocs-operator created
+func (obj *ocsStorageClass) ensureDeleted(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
+
+	sccs, err := r.newStorageClassConfigurations(instance)
+	if err != nil {
+		r.reqLogger.Error(err, fmt.Sprintf("Uninstall: Unable to determine the StorageClass names")) //nolint:gosimple
+		return nil
+	}
+	for _, scc := range sccs {
+		sc := scc.storageClass
+		existing := storagev1.StorageClass{}
+		err := r.client.Get(context.TODO(), types.NamespacedName{Name: sc.Name, Namespace: sc.Namespace}, &existing)
+
+		switch {
+		case err == nil:
+			if existing.DeletionTimestamp != nil {
+				r.reqLogger.Info(fmt.Sprintf("Uninstall: StorageClass %s is already marked for deletion", existing.Name))
+				break
+			}
+
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: Deleting StorageClass %s", sc.Name))
+			existing.ObjectMeta.OwnerReferences = sc.ObjectMeta.OwnerReferences
+			sc.ObjectMeta = existing.ObjectMeta
+
+			err = r.client.Delete(context.TODO(), sc)
+			if err != nil {
+				r.reqLogger.Error(err, fmt.Sprintf("Uninstall: Ignoring error deleting the StorageClass %s", existing.Name))
+			}
+		case errors.IsNotFound(err):
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: StorageClass %s not found, nothing to do", sc.Name))
+		default:
+			r.reqLogger.Info(fmt.Sprintf("Uninstall: Error while getting StorageClass %s: %v", sc.Name, err))
+		}
+	}
 	return nil
 }
 

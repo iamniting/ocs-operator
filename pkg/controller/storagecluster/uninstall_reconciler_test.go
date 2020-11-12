@@ -144,8 +144,9 @@ func TestDeleteStorageClasses(t *testing.T) {
 func assertTestDeleteStorageClasses(t *testing.T, reconciler ReconcileStorageCluster,
 	sc *api.StorageCluster, storageClassExists bool) {
 
+	var obj ocsStorageClass
 	if !storageClassExists {
-		err := reconciler.deleteStorageClasses(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -158,7 +159,7 @@ func assertTestDeleteStorageClasses(t *testing.T, reconciler ReconcileStorageClu
 		assert.Equal(t, !storageClassExists, errors.IsNotFound(err))
 	}
 
-	err = reconciler.deleteStorageClasses(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, scc := range sccs {
@@ -198,8 +199,10 @@ func TestDeleteSnapshotClasses(t *testing.T) {
 func assertTestDeleteSnapshotClasses(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, SnapshotClassExists bool) {
 
+	var obj ocsSnapshotClass
+
 	if !SnapshotClassExists {
-		err := reconciler.deleteSnapshotClasses(sc, reconciler.reqLogger)
+		err := obj.ensureCreated(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -211,7 +214,7 @@ func assertTestDeleteSnapshotClasses(
 		assert.Equal(t, !SnapshotClassExists, errors.IsNotFound(err))
 	}
 
-	err := reconciler.deleteSnapshotClasses(sc, reconciler.reqLogger)
+	err := obj.ensureCreated(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, vssc := range vsscs {
@@ -416,8 +419,10 @@ func TestDeleteCephCluster(t *testing.T) {
 func assertTestDeleteCephCluster(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, cephClusterExist bool) {
 
+	var obj ocsCephCluster
+
 	if !cephClusterExist {
-		err := reconciler.deleteCephCluster(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -431,7 +436,7 @@ func assertTestDeleteCephCluster(
 		assert.True(t, errors.IsNotFound(err))
 	}
 
-	err = reconciler.deleteCephCluster(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	cephCluster = &cephv1.CephCluster{}
@@ -470,8 +475,10 @@ func TestDeleteCephFilesystems(t *testing.T) {
 func assertTestDeleteCephFilesystems(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, cephFilesystemsExist bool) {
 
+	var obj ocsCephFilesystems
+
 	if !cephFilesystemsExist {
-		err := reconciler.deleteCephFilesystems(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -490,7 +497,7 @@ func assertTestDeleteCephFilesystems(
 		}
 	}
 
-	err = reconciler.deleteCephFilesystems(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, cephFilesystem := range cephFilesystems {
@@ -532,8 +539,10 @@ func TestDeleteCephBlockPools(t *testing.T) {
 func assertTestDeleteCephBlockPools(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, cephBlockPoolsExist bool) {
 
+	var obj ocsCephBlockPools
+
 	if !cephBlockPoolsExist {
-		err := reconciler.deleteCephBlockPools(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -552,7 +561,7 @@ func assertTestDeleteCephBlockPools(
 		}
 	}
 
-	err = reconciler.deleteCephBlockPools(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, cephBlockPool := range cephBlockPools {
@@ -611,8 +620,10 @@ func TestDeleteCephObjectStoreUsers(t *testing.T) {
 func assertTestDeleteCephObjectStoreUsers(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, CephObjectStoreUsersExist bool) {
 
+	var obj ocsCephObjectStoreUsers
+
 	if !CephObjectStoreUsersExist {
-		err := reconciler.deleteCephObjectStoreUsers(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -631,7 +642,7 @@ func assertTestDeleteCephObjectStoreUsers(
 		}
 	}
 
-	err = reconciler.deleteCephObjectStoreUsers(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, cephStoreUser := range cephStoreUsers {
@@ -708,8 +719,10 @@ func TestDeleteCephObjectStores(t *testing.T) {
 func assertTestDeleteCephObjectStores(
 	t *testing.T, reconciler ReconcileStorageCluster, sc *api.StorageCluster, CephObjectStoreExist bool) {
 
+	var obj ocsCephObjectStores
+
 	if !CephObjectStoreExist {
-		err := reconciler.deleteCephObjectStores(sc, reconciler.reqLogger)
+		err := obj.ensureDeleted(&reconciler, sc)
 		assert.NoError(t, err)
 	}
 
@@ -728,7 +741,7 @@ func assertTestDeleteCephObjectStores(
 		}
 	}
 
-	err = reconciler.deleteCephObjectStores(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 
 	for _, cephStore := range cephStores {
@@ -818,13 +831,16 @@ func TestDeleteQuickStarts(t *testing.T) {
 			quickstartName: "ocs-configuration",
 		},
 	}
+
+	var obj ocsQuickStarts
+
 	cqs := &consolev1.ConsoleQuickStart{}
 	reconciler := createFakeStorageClusterReconciler(t, cqs)
 	sc := &api.StorageCluster{}
 	mockStorageCluster.DeepCopyInto(sc)
-	err := reconciler.ensureQuickStarts(sc, reconciler.reqLogger)
+	err := obj.ensureCreated(&reconciler, sc)
 	assert.NoError(t, err)
-	err = reconciler.deleteQuickStarts(sc, reconciler.reqLogger)
+	err = obj.ensureDeleted(&reconciler, sc)
 	assert.NoError(t, err)
 	actualQuickStarts := getActualQuickStarts(t, cases, &reconciler)
 	assert.Equal(t, 0, len(actualQuickStarts))

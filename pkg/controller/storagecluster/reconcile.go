@@ -37,8 +37,8 @@ type resourceManager interface {
 	ensureDeleted(*ReconcileStorageCluster, *ocsv1.StorageCluster) error
 }
 
-// ensureFunc which encapsulate all the 'ensure*' type functions
-type ensureFunc func(*ocsv1.StorageCluster, logr.Logger) error
+type ocsCephConfig struct{}
+type ocsJobTemplates struct{}
 
 const (
 	rookConfigMapName = "rook-config-override"
@@ -269,35 +269,36 @@ func (r *ReconcileStorageCluster) reconcilePhases(
 	r.conditions = nil
 	// Start with empty r.phase
 	r.phase = ""
-	var ensureFs []ensureFunc
+	var objs []resourceManager
 	if !instance.Spec.ExternalStorage.Enable {
 		// list of default ensure functions
-		ensureFs = []ensureFunc{
-			// Add support for additional resources here
-			r.ensureStorageClasses,
-			r.ensureSnapshotClasses,
-			r.ensureCephObjectStores,
-			r.ensureCephObjectStoreUsers,
-			r.ensureCephBlockPools,
-			r.ensureCephFilesystems,
-			r.ensureCephConfig,
-			r.ensureCephCluster,
-			r.ensureNoobaaSystem,
-			r.ensureJobTemplates,
-			r.ensureQuickStarts,
+		objs = []resourceManager{
+			&ocsStorageClass{},
+			&ocsSnapshotClass{},
+			&ocsCephObjectStores{},
+			&ocsCephObjectStoreUsers{},
+			&ocsCephBlockPools{},
+			&ocsCephFilesystems{},
+			&ocsCephConfig{},
+			&ocsCephCluster{},
+			&ocsNoobaaSystem{},
+			&ocsJobTemplates{},
+			&ocsQuickStarts{},
 		}
+
 	} else {
 		// for external cluster, we have a different set of ensure functions
-		ensureFs = []ensureFunc{
-			r.ensureExternalStorageClusterResources,
-			r.ensureCephCluster,
-			r.ensureSnapshotClasses,
-			r.ensureNoobaaSystem,
-			r.ensureQuickStarts,
+		objs = []resourceManager{
+			&ocsExternalResources{},
+			&ocsCephCluster{},
+			&ocsSnapshotClass{},
+			&ocsNoobaaSystem{},
+			&ocsQuickStarts{},
 		}
 	}
-	for _, f := range ensureFs {
-		err := f(instance, reqLogger)
+
+	for _, obj := range objs {
+		err := obj.ensureCreated(r, instance)
 		if r.phase == statusutil.PhaseClusterExpanding {
 			instance.Status.Phase = statusutil.PhaseClusterExpanding
 		} else if instance.Status.Phase != statusutil.PhaseReady &&
@@ -446,9 +447,9 @@ func (r *ReconcileStorageCluster) validateStorageDeviceSets(sc *ocsv1.StorageClu
 	return nil
 }
 
-// ensureCephConfig ensures that a ConfigMap resource exists with its Spec in
+// ensureCreated ensures that a ConfigMap resource exists with its Spec in
 // the desired state.
-func (r *ReconcileStorageCluster) ensureCephConfig(sc *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+func (obj *ocsCephConfig) ensureCreated(r *ReconcileStorageCluster, sc *ocsv1.StorageCluster) error {
 	ownerRef := metav1.OwnerReference{
 		UID:        sc.UID,
 		APIVersion: sc.APIVersion,
@@ -470,7 +471,7 @@ func (r *ReconcileStorageCluster) ensureCephConfig(sc *ocsv1.StorageCluster, req
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: rookConfigMapName, Namespace: sc.Namespace}, found)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			reqLogger.Info("Creating Ceph ConfigMap")
+			r.reqLogger.Info("Creating Ceph ConfigMap")
 			err = r.client.Create(context.TODO(), cm)
 			if err != nil {
 				return err
@@ -487,9 +488,14 @@ func (r *ReconcileStorageCluster) ensureCephConfig(sc *ocsv1.StorageCluster, req
 	}
 	val, ok := found.Data["config"]
 	if !ok || val != rookConfigData || !ownerRefFound {
-		reqLogger.Info("Updating Ceph ConfigMap")
+		r.reqLogger.Info("Updating Ceph ConfigMap")
 		return r.client.Update(context.TODO(), cm)
 	}
+	return nil
+}
+
+// ensureDeleted is dummy func for the ocsCephConfig
+func (obj *ocsCephConfig) ensureDeleted(r *ReconcileStorageCluster, instance *ocsv1.StorageCluster) error {
 	return nil
 }
 
@@ -556,8 +562,8 @@ func remove(slice []string, s string) (result []string) {
 	return
 }
 
-// ensureJobTemplates ensures if the osd removal job template exists
-func (r *ReconcileStorageCluster) ensureJobTemplates(sc *ocsv1.StorageCluster, reqLogger logr.Logger) error {
+// ensureCreated ensures if the osd removal job template exists
+func (obj *ocsJobTemplates) ensureCreated(r *ReconcileStorageCluster, sc *ocsv1.StorageCluster) error {
 	osdCleanUpTemplate := &openshiftv1.Template{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ocs-osd-removal",
@@ -588,6 +594,11 @@ or if an OSD ID is not found, errors will be generated in the log and no OSDs wo
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create Template: %v", err.Error())
 	}
+	return nil
+}
+
+// ensureDeleted is dummy func for the ocsJobTemplates
+func (obj *ocsJobTemplates) ensureDeleted(r *ReconcileStorageCluster, sc *ocsv1.StorageCluster) error {
 	return nil
 }
 
